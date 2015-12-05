@@ -1,7 +1,4 @@
 /* 
-*	SYSC 4001 - Assignment 2
-*	Maryn Marsland
-*	100854916
 *	Producer and consumer threads
 */ 
 
@@ -9,18 +6,19 @@
 
 
 void *ConsumerThreadFunction(void *arg);
+void *QueueBalanceFunction(void *arg);
 
-
-int BytesWritten = 0;	//count of the total number of bytes written to the shared memory
-int TotalBytes;	//the total number of bytes in the file
 
 char input_file [100];
 FILE* in;
 size_t file_read_size = 15;
 //char input_buffer [process_size];
 int NUM_CPUS = 4;
+int running = 1;
 
-struct task_struct queue1[100];
+int q[4] = {0};
+
+struct task_queue run_queues[12];	//twelve run queues: 3 levels for each CPU. [0], [1]], [2] -> RQ0, RQ1, RQ2 for CPU1 (etc.)
 
 int main(int argc, const char * argv[]) 
 {
@@ -30,9 +28,11 @@ char input_buffer [file_read_size];
     int res;
 
     pthread_t con_thread[NUM_CPUS];
+    pthread_t qb_thread;
     void *thread_result;
     int CPU_number = 0;
 
+/*Start Consumer threads*/
 	for(CPU_number = 0; CPU_number<NUM_CPUS; CPU_number++) {
     		res = pthread_create(&(con_thread[CPU_number]), NULL, ConsumerThreadFunction, (void *)&CPU_number);
    	 	if (res != 0) {
@@ -42,10 +42,17 @@ char input_buffer [file_read_size];
 		sleep(1);
 	}
 
+/*Start queue balancer thread*/
+	res = pthread_create(&(qb_thread), NULL, QueueBalanceFunction, NULL);
+	if (res != 0) {
+        		perror("Consumer thread creation failed");
+        		exit(EXIT_FAILURE);
+		}
+
 	//allow time for consumers to get ready
 	sleep(1);
 
-/*Producer thread*/
+/*Producer (main) thread*/
 	/* get input file name */
 	strcpy(input_file, "input.txt");	//use defult file input.txt
 
@@ -58,137 +65,192 @@ char input_buffer [file_read_size];
 	if(in == NULL)
 	{
 		printf("File '%s' does not exist in this location.\n Closing producer.\n", input_file);
-		return;
+		return NULL;
 	}
 
 
 	/* set up/connect to semaphores	*/
 	union semun sem_union;
+	int i;
 	
-	Q1 = semget((key_t) 1234, 1, 0666 | IPC_CREAT);
+	Q_sem[0] = semget((key_t) 1234, 1, 0666 | IPC_CREAT);
 	sem_union.val = 0;
-	semctl(Q1, 0, SETVAL, sem_union);
+	semctl(Q_sem[0], 0, SETVAL, sem_union);
 
-	Q2 = semget((key_t) 2134, 1, 0666 | IPC_CREAT);
+	Q_sem[1] = semget((key_t) 2134, 1, 0666 | IPC_CREAT);
 	sem_union.val = 0;
-	semctl(Q2, 0, SETVAL, sem_union);
+	semctl(Q_sem[1], 0, SETVAL, sem_union);
 
-	Q3 = semget((key_t) 3124, 1, 0666 | IPC_CREAT);
+	Q_sem[2] = semget((key_t) 3124, 1, 0666 | IPC_CREAT);
 	sem_union.val = 0;
-	semctl(Q3, 0, SETVAL, sem_union);
+	semctl(Q_sem[2], 0, SETVAL, sem_union);
 
-	Q4 = semget((key_t) 4123, 1, 0666 | IPC_CREAT);
+	Q_sem[3] = semget((key_t) 4123, 1, 0666 | IPC_CREAT);
 	sem_union.val = 0;
-	semctl(Q4, 0, SETVAL, sem_union);
+	semctl(Q_sem[3], 0, SETVAL, sem_union);
+
+	for(i = 0; i < 4; i++)
+		sem_init(&CPU_sem[i], 0, 0);
 
 
+	i = 0;
+	int j = 0;
+	int k = 0;
+	int value_read = 0;
+	int sem_val;
+	/* read from file into input buffer */
+	for(i = 0; i<20; i++)			//read 20 "processes" from input file
+	{
+			//add the itmes to the four queues, one at a time
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("%d pid = %d\n", k, value_read);
+			run_queues[j].q[k].pid = value_read;
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("%d static_prio = %d\n", k, value_read);
+			run_queues[j].q[k].static_prio = value_read;
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("%d prio = %d\n", k, value_read);
+			run_queues[j].q[k].prio = value_read;
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("%d ex_time = %d\n", k, value_read);
+			run_queues[j].q[k].ex_time = value_read;
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("%d time_slice = %d\n", k, value_read);
+			run_queues[j].q[k].time_slice = value_read;
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("%d accu_time_slice = %d\n", k, value_read);
+			run_queues[j].q[k].accu_time_slice = value_read;
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("%d last_cpu = %d\n", k, value_read);
+			run_queues[j].q[k].last_cpu = value_read;
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("expected_st = %d\n", k, value_read);
+			run_queues[j].q[k].expected_st = value_read;
+			
+			fgets(input_buffer, 10, in);
+			value_read = atoi(input_buffer);
+			//printf("sched_type = %d\n", k, value_read);
+			run_queues[j].q[k].sched_type = value_read;
+			
+			fgets(input_buffer, 5, in);	//ignore space between set
+			
+			//signal semaphore for queue
+			sem_s(Q_sem[j]);
+			//sem_post(&(CPU_sem[j]));
+			sem_getvalue(&(CPU_sem[j]), &sem_val);
+			q[j]++;
+			//printf("**Signalling Queue %d. Value is now %d\n", j, q[j]);
+			
+			//move to next queue or roll-over to first queue
+			j++;
+			//printf("\n\n");
+			if(j>3) {
+				j = 0;
+				k++;		//increment index in queue
+			}
+	}
 
-	/* prepare variables for counts and connection to shared memory */
-
-	//while(BytesWritten < TotalBytes)	//while not at the end of the input file
-	{	int i = 0;
-		/* read from file into input buffer */
-		fgets(input_buffer, 20, in);
-
-
-		int item = sscanf(input_buffer, "%d", &res);
-		printf("int = %d\n", res);
-		item = sscanf(input_buffer, "%d", &res);
-		printf("int = %d\n", res);
-		//count = fread(input_buffer, 1, file_read_size, in);
-
-					printf("Read bytes from file: %s\n", input_buffer); 
-		for(i = 0; i<19; i++)
-			printf("ib[%d] = %d\n", i, input_buffer[i]);
-		queue1[0].static_prio = 22;
-		printf("%d\n", queue1[0].static_prio);
-		sem_s(Q1);
-		sleep(1);
-		//queue1->q[0].static_prio = input_buffer[1];
-		//printf("Queue 1 static priority = %d\n", queue1->q[0].static_prio);
-		//begin_index = 0;
-		//printf("i = %d", i);
-}
 	fclose(in);
-	sleep(3);
+	sleep(8);
+	
+	printf("Producer done, wating for CPUs to finish.\n");
+	for(CPU_number = 0; CPU_number<NUM_CPUS; CPU_number++) {
+    		res = pthread_join(con_thread[CPU_number], &thread_result);
+   	 	if (res != 0) {
+        		perror("CPU thread join falied.");
+        		exit(EXIT_FAILURE);
+		}
+		sleep(1);
+	}
+	
+	running = 0;
+	res = pthread_join(qb_thread, &thread_result);
+   	 	if (res != 0) {
+        		perror("Thread join falied.");
+        		exit(EXIT_FAILURE);
+		}
+	printf("All threads complete.\n");
+	exit(EXIT_SUCCESS);
 }
-
 
 
 
 void *ConsumerThreadFunction(void *arg)
 {
-	int number = *(int *)arg + 1;
-	printf("CPU %d thread started.\n", number);
-	char output_file [100];
-	FILE* out;
+	int CPUnumber = *(int *)arg;
+	printf("CPU %d thread started.\n", CPUnumber);
+    sleep(10);
 
-		strcpy(output_file, "output.txt");	//use defult file input.txt
-	out = fopen(output_file, "w");
-	//open file
-	if(out == NULL)
-	{
-		printf("File '%s' does not exist in this location.\n Closing consumer.\n", output_file);
-		return;
-	}
-
-
-	/* set up/connect to semaphores	*/
 	union semun sem_union;
-	
-	Q1 = semget((key_t) 1234, 1, 0666 | IPC_CREAT);
-	sem_union.val = 0;
-	semctl(Q1, 0, SETVAL, sem_union);
+	int i;
+	int sem_val;
 
-	Q2 = semget((key_t) 2134, 1, 0666 | IPC_CREAT);
-	sem_union.val = 0;
-	semctl(Q2, 0, SETVAL, sem_union);
-
-	Q3 = semget((key_t) 3124, 1, 0666 | IPC_CREAT);
-	sem_union.val = 0;
-	semctl(Q3, 0, SETVAL, sem_union);
-
-	Q4 = semget((key_t) 4123, 1, 0666 | IPC_CREAT);
-	sem_union.val = 0;
-	semctl(Q4, 0, SETVAL, sem_union);
-
-	sem_w(Q1);
-	printf("CPU %d read: %d from queue1\n", number, queue1[0].static_prio);
-/*
-	//get total bytes in file from producer
-	printf("	Waiting for producer to connect and send the size of its input file...\n");
-	sem_w(N);
-	sem_s(S);
-	int totalBytesInFile = consumer_buffer->buf[buffer_index].size;
-	sem_w(S);
-	
-	int totalByteCount = 0;
-	int count;
-
-	while(totalByteCount < totalBytesInFile)
+	for(i=0;i<5;i++)
 	{
-		buffer_index ++;
-		sem_w(N);	//wait on semaphore N: run queue not empty
-		//sem_w(S);	//wait on semaphore S: queue not in use
-
-		//"consume" buffer from shared memory
-		//printf("Read from buffer[%d]: %s\n", buffer_index, consumer_buffer->buf[buffer_index].data);
-		//printf("Bytes read = %d\n", consumer_buffer->buf[buffer_index].size);
-		count = fwrite(consumer_buffer->buf[buffer_index].data, 1, consumer_buffer->buf[buffer_index].size, out);
-		if(count != consumer_buffer->buf[buffer_index].size)
-			printf("Error in writing to file!!");
-		totalByteCount += count;
-
-		//sem_s(S);	//signal semaphore S
-
+		q[CPUnumber]--;
+		sem_getvalue(&(CPU_sem[i]), &sem_val);
+		printf("Waiting on semaphore Q%d, value is currently %d.\n", CPUnumber, q[CPUnumber]);
+		sem_w(Q_sem[CPUnumber]);
+		//sem_wait(&(CPU_sem[CPUnumber]));
+		//printf("CPU %d : %d from queue in queue position %d.\n", CPUnumber, run_queues[CPUnumber].q[i].pid, i);
+		//print process information
+		printf("CPU %d: process PID %d slecected. Priority is %d. Time slice allocated %d, time slice used %d.\n", CPUnumber, run_queues[CPUnumber].q[i].pid, run_queues[CPUnumber].q[i].prio, run_queues[CPUnumber].q[i].time_slice, run_queues[CPUnumber].q[i].accu_time_slice);
+	
+		//calculate time quantum
+		if(run_queues[CPUnumber].q[i].static_prio > 120)
+			run_queues[CPUnumber].q[i].time_slice = (140 - run_queues[CPUnumber].q[i].static_prio)*20;
+		else
+			run_queues[CPUnumber].q[i].time_slice = (140 - run_queues[CPUnumber].q[i].static_prio)*5;
+		
+		
+		printf("Process PID %d time quantum calculated to be %d.\n", run_queues[CPUnumber].q[i].pid, run_queues[CPUnumber].q[i].time_slice);
+		//"execute" process for time quantum
+		usleep(run_queues[CPUnumber].q[i].time_slice);
+		
+		//update process
+		run_queues[CPUnumber].q[i].accu_time_slice += run_queues[CPUnumber].q[i].time_slice;
+		run_queues[CPUnumber].q[i].last_cpu = CPUnumber;
 	}
-	//once reached end of file, close output file
-	printf("	Total bytes written to file %s = %d.\n", output_file, totalByteCount);
-	fclose(out);
+	
+	printf("CPU %d completed execution of run queue. Exiting.\n\n", CPUnumber);
+	pthread_exit("Thread complete.");
+}
 
 
-*/
-
-
+void *QueueBalanceFunction(void *arg)
+{
+		printf("Queue balancer started.\n");
+		
+	/*Queue balancer checks the number of processes in each of the run queues every 3 seconds and balances them as needed*/
+		while(running)
+		{
+			sleep(3);
+			
+			//check number of items in each queue
+			
+			//if(q1 == q2 == q3 == q4)
+				printf("Run queues balanced.\n");
+			//else
+				//balance queues
+				//printf("Run queues have been balanced.\n");
+		}
+		printf("Queue balance thread exiting.\n");
+		pthread_exit("Thread complete.");
 }
 
