@@ -1,8 +1,5 @@
 /* 
-*	SYSC 4001 - Assignment 3
-*	Maryn Marsland
-*	100854916
-*	Shared components
+*	Components
 */
 
 #include <unistd.h>
@@ -18,18 +15,17 @@
 #include <pthread.h>
 #include <sched.h>
 
-//buffers of shared memory
-struct buffer{
-	struct buf{
-	int size;
-	char data [128];
-	}buf[100];
-};
 
-//run queue for CPU 1 (consumer 1)
-struct task_struct{
-	//struct task_struct{
-	  	pid_t pid;
+void *ConsumerThreadFunction(void *arg);
+void *QueueBalanceFunction(void *arg);
+
+
+//run queue for CPUs
+struct task_queue{
+	int a;
+	struct task_struct{
+		int sched_type;		//0 -> SCHED_FIFO, 1 -> SCHED_RR, 2 -> SHED_NORMAL
+	  	int pid;
 	  	int static_prio;	//static priority
 		int prio;		//dynamic priority
 		int ex_time;		//expected execution time
@@ -38,7 +34,7 @@ struct task_struct{
 		int last_cpu;		//the CPU (thread) that the process last ran
 		int expected_st;	//expected service time
 		
-	//}q[100];			//large run queue size, so that there is no overflow
+	}q[100];			//large run queue size, so that there is no overflow
 };
 
 
@@ -49,12 +45,12 @@ union semun {
 	unsigned short *array;
 };
 
-int Q1;		//semaphore Q1: sempahore for run queue 1, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
-int Q2;		//semaphore Q2: sempahore for run queue 2, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
-int Q2;		//semaphore Q3: sempahore for run queue 3, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
-int Q4;		//semaphore Q4: sempahore for run queue 4, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
+int Q_sem[4];		//semaphores for the four run queues: sempahore for run queue 1, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
+//int Q2;		//semaphore Q2: sempahore for run queue 2, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
+//int Q3;		//semaphore Q3: sempahore for run queue 3, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
+//int Q4;		//semaphore Q4: sempahore for run queue 4, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
 
-int sizeOfFile;
+sem_t CPU_sem[4];
 
 //semaphore wait
 int sem_w(int semaphore)
@@ -63,7 +59,7 @@ int sem_w(int semaphore)
     struct sembuf sem_b;
     
     sem_b.sem_num = 0;
-    sem_b.sem_op = -1; /* "wait" operation: decrese semaphore valuse by 1 */
+    sem_b.sem_op = -1; /* "wait" operation: decrese semaphore value by 1 */
     sem_b.sem_flg = 0;
     if (semop(semaphore, &sem_b, 1) == -1) {
         fprintf(stderr, "semaphore_p failed\n");

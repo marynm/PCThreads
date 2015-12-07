@@ -14,27 +14,36 @@
 #include <sys/shm.h>
 #include <pthread.h>
 #include <sched.h>
+#include <sys/time.h>
+#include <math.h>
 
+#define QUEUE_SIZE 10
+#define MAX_SLEEP_AVG 10
 
 void *ConsumerThreadFunction(void *arg);
 void *QueueBalanceFunction(void *arg);
+int check_balanced(int a, int b, int c, int d);
+int find_max(int value1, int index1, int value2, int index2, int value3, int index3, int value4, int index4);
+int find_min(int value1, int index1, int value2, int index2, int value3, int index3, int value4, int index4);
 
+int total_processes = 20;
+int remaining_processes;
 
 //run queue for CPUs
 struct task_queue{
 	int a;
 	struct task_struct{
-	  	int pid;
-	  	int static_prio;	//static priority
-		int prio;		//dynamic priority
-		int ex_time;		//expected execution time
-		int time_slice;		//time slice
-		int accu_time_slice;	//accumulated time slice
-		int last_cpu;		//the CPU (thread) that the process last ran
-		int expected_st;	//expected service time
 		int sched_type;		//0 -> SCHED_FIFO, 1 -> SCHED_RR, 2 -> SHED_NORMAL
+	  	int pid;	
+	  	int static_prio;		//static priority
+		int prio;				//dynamic priority (initially, and always for FIFO/RR, prio = static prio)
+		int time_slice;			//time slice
+		int accu_time_slice;	//accumulated time slice
+		int last_cpu;			//the CPU (thread) that the process last ran
+		int expected_st;		//expected service time
+		int sleep_avg;
 		
-	}q[100];			//large run queue size, so that there is no overflow
+	}q[QUEUE_SIZE];			//large enough queue size sto avoid overflow for this 20-process scenario
 };
 
 
@@ -45,10 +54,8 @@ union semun {
 	unsigned short *array;
 };
 
-int Q_sem[4];		//semaphores for the four run queues: sempahore for run queue 1, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
-//int Q2;		//semaphore Q2: sempahore for run queue 2, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
-//int Q3;		//semaphore Q3: sempahore for run queue 3, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
-//int Q4;		//semaphore Q4: sempahore for run queue 4, indicating when there is a 'process' in the queue. Initialized to 0, each run queue begins empty
+int Q_sem[12];		//semaphores for the twelve run queues: For synchronization, indicating the number of 'processes' in the queue. Initialized to 0 as each run queue begins empty
+int ME_sem[12];		//semaphores for mutual exclusion on each of the queues (primarily to ensure the queue balancer doesn't change a queue while the CPU is changing it)
 
 sem_t CPU_sem[4];
 
@@ -84,4 +91,19 @@ struct sembuf sem_b;
     return(1);
 }
 
+int max(int a, int b)
+{
+	
+	if(a>b)
+		return a;
+	else
+		return b;
+}
 
+int min(int a, int b)
+{
+	if(a<b)
+		return a;
+	else
+		return b;
+}
